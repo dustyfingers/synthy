@@ -120,7 +120,7 @@ unsafe impl HasRawWindowHandle for VstParent {
 fn draw_ui(ctx: &CtxRef, params: &mut Arc<Parameters>) -> egui::Response {
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.vertical(|ui| {
-            ui.label("hello rust");
+            ui.label("synthy");
             ui.label(format!(
                 "Modulation: {}",
                 params.get_parameter(crate::Parameter::Modulation as i32)
