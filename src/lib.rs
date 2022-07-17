@@ -2,9 +2,10 @@
 mod params;
 
 use fundsp::hacker::*;
-use params::{Parameter, Parameters};
-use std::sync::Arc;
+use params:: {Parameter, Parameters};
+use std::{convert::TryFrom, sync::Arc};
 use vst::prelude::*;
+use wmidi::{Note, Velocity};
 
 const FREQ_SCALAR: f64 = 1000.;
 
@@ -15,6 +16,8 @@ struct Synthy {
     audio: Box<dyn AudioUnit64 + Send>,
     // add a thread-safe parameters field
     parameters: Arc<Parameters>,
+    // store note as an option
+    note: Option<(Note, Velocity)>
 }
 
 impl Plugin for Synthy {
@@ -30,6 +33,7 @@ impl Plugin for Synthy {
         Self {
             audio: Box::new(audio_graph) as Box<dyn AudioUnit64 + Send>,
             parameters: Default::default(),
+            note: None
         }
     }
 
@@ -75,7 +79,7 @@ impl Plugin for Synthy {
 
                 self.audio.set(
                     Parameter::Freq as i64,
-                    self.parameters.get_parameter(Parameter::Freq as i32) as f64 * FREQ_SCALAR,
+                    self.note.map(|(n, ..)| n.to_freq_f64()).unwrap_or(0.),
                 );
 
                 self.audio.process(
@@ -90,6 +94,30 @@ impl Plugin for Synthy {
 
                 for (chunk, output) in right_chunk.iter_mut().zip(right_buffer.iter()) {
                     *chunk = *output as f32;
+                }
+            }
+        }
+    }
+
+    // handle midi events
+    fn process_events(&mut self, events: &vst::api::Events) {
+        for event in events.events() {
+            if let vst::event::Event::Midi(midi) = event {
+                if let Ok(midi) = wmidi::MidiMessage::try_from(midi.data.as_slice()) {
+                    // actually process midi events here
+                    match midi {
+                        wmidi::MidiMessage::NoteOn(_channel, note, velocity) => {
+                            self.note = Some((note, velocity));
+                        }
+                        wmidi::MidiMessage::NoteOff(_channel, note, _velocity) => {
+                            if let Some((current_note, ..)) = self.note {
+                                if current_note == note {
+                                    self.note = None;
+                                }
+                            }
+                        },
+                        _ => ()
+                    }
                 }
             }
         }
