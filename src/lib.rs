@@ -2,12 +2,11 @@
 mod params;
 
 use fundsp::hacker::*;
+use num_derive::FromPrimitive;
 use params:: {Parameter, Parameters};
-use std::{convert::TryFrom, sync::Arc};
+use std::{convert::TryFrom, sync::Arc, time::Duration};
 use vst::prelude::*;
 use wmidi::{Note, Velocity};
-
-const FREQ_SCALAR: f64 = 1000.;
 
 // define the plugin struct
 struct Synthy {
@@ -17,23 +16,32 @@ struct Synthy {
     // add a thread-safe parameters field
     parameters: Arc<Parameters>,
     // store note as an option
-    note: Option<(Note, Velocity)>
+    note: Option<(Note, Velocity)>,
+    enabled: bool,
+    sample_rate: f32,
+    time: Duration
 }
 
 impl Plugin for Synthy {
+    // called on init
     #[allow(clippy::precendence)]
     fn new(_host: HostCallback) -> Self {
-        let Parameters { freq, modulation } = Parameters::default();
-        let hz = freq.get() as f64 * FREQ_SCALAR;
-        let freq = || tag(Parameter::Freq as i64, hz);
-        let modulation = || tag(Parameter::Modulation as i64, modulation.get() as f64);
+        let Parameters { modulation } = Parameters::default();
+        let freq = || tag(Tag::Freq as i64, 440.);
+        let modulation = || tag(Tag::Modulation as i64, modulation.get() as f64);
+        // generate envelope
+        let offset = || tag(Tag::NoteOn as i64, 0.);
+        let env = || offset() >> envelope2(|t, offset| downarc((t - offset) * 2.));
         // create a new audio graph description using the hz, freq and modulation
-        let audio_graph = freq() >> sine() * freq() * modulation() + freq() >> sine() >> split::<U2>();
+        let audio_graph = freq() >> sine() * freq() * modulation() + freq() >> env() * sine() >> split::<U2>();
         // notice the implicit return here
         Self {
             audio: Box::new(audio_graph) as Box<dyn AudioUnit64 + Send>,
             parameters: Default::default(),
-            note: None
+            note: None,
+            time: Duration::default(),
+            sample_rate: 40_000f32,
+            enabled: false,
         }
     }
 
@@ -46,7 +54,7 @@ impl Plugin for Synthy {
             category: Category::Synth,
             inputs: 0,
             outputs: 2,
-            parameters: 2,
+            parameters: 1,
             ..Info::default()
         }
     }
@@ -72,21 +80,22 @@ impl Plugin for Synthy {
                 let mut right_buffer = [0f64; MAX_BUFFER_SIZE];
                 let mut left_buffer = [0f64; MAX_BUFFER_SIZE];
 
-                self.audio.set(
-                    Parameter::Modulation as i64,
-                    self.parameters.get_parameter(Parameter::Modulation as i32) as f64,
-                );
+                self.set_tag_with_param(Tag::Modulation, Parameter::Modulation);
 
-                self.audio.set(
-                    Parameter::Freq as i64,
-                    self.note.map(|(n, ..)| n.to_freq_f64()).unwrap_or(0.),
-                );
+                if let Some((note, ..)) = self.note {
+                    self.set_tag(Tag::Freq, note.to_freq_f64())
+                }
 
-                self.audio.process(
-                    MAX_BUFFER_SIZE,
-                    &[],
-                    &mut [&mut left_buffer, &mut right_buffer],
-                );
+                if self.enabled {
+                    // do timekeeping stuff and process audio buffer
+                    self.time += Duration::from_secs_f32(MAX_BUFFER_SIZE as f32 / self.sample_rate);
+                    self.audio.process(
+                        MAX_BUFFER_SIZE,
+                        &[],
+                        &mut [&mut left_buffer, &mut right_buffer],
+                    );
+                }
+
 
                 for (chunk, output) in left_chunk.iter_mut().zip(left_buffer.iter()) {
                     *chunk = *output as f32;
@@ -107,7 +116,10 @@ impl Plugin for Synthy {
                     // actually process midi events here
                     match midi {
                         wmidi::MidiMessage::NoteOn(_channel, note, velocity) => {
+                            // set NoteOn time tag and enable synth
+                            self.set_tag(Tag::NoteOn, self.time.as_secs_f64());
                             self.note = Some((note, velocity));
+                            self.enabled = true;
                         }
                         wmidi::MidiMessage::NoteOff(_channel, note, _velocity) => {
                             if let Some((current_note, ..)) = self.note {
@@ -122,6 +134,26 @@ impl Plugin for Synthy {
             }
         }
     }
+}
+
+impl Synthy {
+    #[inline(always)]
+    fn set_tag(&mut self, tag: Tag, value: f64) {
+        self.audio.set(tag as i64, value);
+    }
+
+    #[inline(always)]
+    fn set_tag_with_param(&mut self, tag: Tag, param: Parameter) {
+        self.set_tag(tag, self.parameters.get_parameter(param as i32) as f64);
+    }
+}
+
+// Tag enum
+#[derive(FromPrimitive, Clone, Copy)]
+pub enum Tag {
+    Freq = 0,
+    Modulation = 1,
+    NoteOn = 2,
 }
 
 // actually build the plugin

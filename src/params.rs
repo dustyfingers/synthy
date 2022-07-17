@@ -1,11 +1,10 @@
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use std::fmt::Display;
-use vst::prelude::*;
+use vst::{plugin::PluginParameters, util::AtomicFloat};
 
 // create the 'Parameters' struct
 pub struct Parameters {
-    pub freq: AtomicFloat,
     pub modulation: AtomicFloat,
 }
 
@@ -13,7 +12,6 @@ impl Default for Parameters {
     // set defaults
     fn default() -> Self {
         Self {
-            freq: AtomicFloat::new(0.44),
             modulation: AtomicFloat::new(1.),
         }
     }
@@ -23,7 +21,6 @@ impl PluginParameters for Parameters {
     // requred get and set methods
     fn get_parameter(&self, index: i32) -> f32 {
         match FromPrimitive::from_i32(index) {
-            Some(Parameter::Freq) => self.freq.get(),
             Some(Parameter::Modulation) => self.modulation.get(),
             _ => 0f32,
         }
@@ -31,7 +28,6 @@ impl PluginParameters for Parameters {
 
     fn set_parameter(&self, index: i32, value: f32) {
         match FromPrimitive::from_i32(index) {
-            Some(Parameter::Freq) => self.freq.set(value),
             Some(Parameter::Modulation) => self.modulation.set(value),
             _ => (),
         }
@@ -48,8 +44,7 @@ impl PluginParameters for Parameters {
 // tagged enum - to replace magic numbers
 #[derive(FromPrimitive, Clone, Copy)]
 pub enum Parameter {
-    Freq = 0,
-    Modulation = 1,
+    Modulation = 0,
 }
 
 // display to make things look nice
@@ -59,7 +54,6 @@ impl Display for Parameter {
             f,
             "{}",
             match self {
-                Parameter::Freq => "frequency",
                 Parameter::Modulation => "modulation",
             }
         )
