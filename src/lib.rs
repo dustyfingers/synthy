@@ -1,5 +1,6 @@
 // imports
 mod params;
+mod editor;
 
 use fundsp::hacker::*;
 use num_derive::FromPrimitive;
@@ -19,13 +20,15 @@ struct Synthy {
     note: Option<(Note, Velocity)>,
     enabled: bool,
     sample_rate: f32,
-    time: Duration
+    time: Duration,
+    editor: Option<editor::PluginEditor>,
 }
 
 impl Plugin for Synthy {
     // called on init
     fn init(&mut self) {
-        // set up logging
+        // Set up logs, adapted from code from DGriffin91
+        // MIT: https://github.com/DGriffin91/egui_baseview_test_vst2/blob/main/LICENSE
         let Info {
             name,
             version,
@@ -38,11 +41,11 @@ impl Plugin for Synthy {
         let log_config = ::simplelog::ConfigBuilder::new()
             .set_time_to_local(true)
             .build();
-        simplelog::WriteLogger::init(simplelog::LevelFilter::Info, log_config, lof_file).ok();
+        simplelog::WriteLogger::init(simplelog::LevelFilter::Info, log_config, log_file).ok();
         log_panics::init();
         log::info!("init");
     }
-    
+
     #[allow(clippy::precendence)]
     fn new(_host: HostCallback) -> Self {
         let Parameters { modulation } = Parameters::default();
@@ -57,14 +60,28 @@ impl Plugin for Synthy {
         >> env() * sine() 
         >> declick()
         >> split::<U2>();
+        let params: Arc<Parameters> = Arc::new(Default::default());
         // notice the implicit return here
         Self {
             audio: Box::new(audio_graph) as Box<dyn AudioUnit64 + Send>,
-            parameters: Default::default(),
+            parameters: params.clone(),
             note: None,
             time: Duration::default(),
             sample_rate: 40_000f32,
             enabled: false,
+            editor: Some(editor::PluginEditor {
+                params,
+                window_handle: None,
+                is_open: false,
+            })
+        }
+    }
+
+    fn get_editor(&mut self) -> Option<Box<dyn vst::editor::Editor>> {
+        if let Some(editor) = self.editor.take() {
+            Some(Box::new(editor) as Box<dyn vst::editor::Editor>)
+        } else {
+            None
         }
     }
 
