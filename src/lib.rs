@@ -4,7 +4,7 @@ mod params;
 use fundsp::hacker::*;
 use num_derive::FromPrimitive;
 use params:: {Parameter, Parameters};
-use std::{convert::TryFrom, sync::Arc, time::Duration};
+use std::{convert::TryFrom, sync::Arc, time::Duration, ops::RangeInclusive};
 use vst::prelude::*;
 use wmidi::{Note, Velocity};
 
@@ -33,7 +33,11 @@ impl Plugin for Synthy {
         let offset = || tag(Tag::NoteOn as i64, 0.);
         let env = || offset() >> envelope2(|t, offset| downarc((t - offset) * 2.));
         // create a new audio graph description using the hz, freq and modulation
-        let audio_graph = freq() >> sine() * freq() * modulation() + freq() >> env() * sine() >> split::<U2>();
+        let audio_graph = freq() 
+        >> sine() * freq() * modulation() + freq() 
+        >> env() * sine() 
+        >> declick()
+        >> split::<U2>();
         // notice the implicit return here
         Self {
             audio: Box::new(audio_graph) as Box<dyn AudioUnit64 + Send>,
@@ -80,7 +84,7 @@ impl Plugin for Synthy {
                 let mut right_buffer = [0f64; MAX_BUFFER_SIZE];
                 let mut left_buffer = [0f64; MAX_BUFFER_SIZE];
 
-                self.set_tag_with_param(Tag::Modulation, Parameter::Modulation);
+                self.set_tag_with_param(Tag::Modulation, Parameter::Modulation, 0f64..=10f64);
 
                 if let Some((note, ..)) = self.note {
                     self.set_tag(Tag::Freq, note.to_freq_f64())
@@ -134,6 +138,13 @@ impl Plugin for Synthy {
             }
         }
     }
+
+    // set sample rate
+    fn set_sample_rate(&mut self, rate: f32) {
+        self.sample_rate = rate;
+        self.time = Duration::default();
+        self.audio.reset(Some(rate as f64));
+    }
 }
 
 impl Synthy {
@@ -143,8 +154,10 @@ impl Synthy {
     }
 
     #[inline(always)]
-    fn set_tag_with_param(&mut self, tag: Tag, param: Parameter) {
-        self.set_tag(tag, self.parameters.get_parameter(param as i32) as f64);
+    fn set_tag_with_param(&mut self, tag: Tag, param: Parameter, range: RangeInclusive<f64>) {
+        let value = self.parameters.get_parameter(param as i32) as f64;
+        let mapped_value = (value - range.start()) * (range.end() - range.start()) + range.start();
+        self.set_tag(tag, mapped_value);
     }
 }
 
