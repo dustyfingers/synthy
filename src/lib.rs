@@ -24,6 +24,25 @@ struct Synthy {
 
 impl Plugin for Synthy {
     // called on init
+    fn init(&mut self) {
+        // set up logging
+        let Info {
+            name,
+            version,
+            unique_id,
+            ..
+        } = self.get_info();
+        let home = dirs::home_dir().unwrap().join("tmp");
+        let id_string = format!("{name}-{version}-{unique_id}-log.txt");
+        let log_file = std::fs::File::create(home.join(id_string)).unwrap();
+        let log_config = ::simplelog::ConfigBuilder::new()
+            .set_time_to_local(true)
+            .build();
+        simplelog::WriteLogger::init(simplelog::LevelFilter::Info, log_config, lof_file).ok();
+        log_panics::init();
+        log::info!("init");
+    }
+    
     #[allow(clippy::precendence)]
     fn new(_host: HostCallback) -> Self {
         let Parameters { modulation } = Parameters::default();
@@ -32,7 +51,7 @@ impl Plugin for Synthy {
         // generate envelope
         let offset = || tag(Tag::NoteOn as i64, 0.);
         let env = || offset() >> envelope2(|t, offset| downarc((t - offset) * 2.));
-        // create a new audio graph description using the hz, freq and modulation
+        // create a new audio graph description using the env, freq and modulation
         let audio_graph = freq() 
         >> sine() * freq() * modulation() + freq() 
         >> env() * sine() 
